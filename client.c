@@ -13,6 +13,10 @@
 #define BUFFSIZE 100          /* taille des buffers envoyés */
 #define SOCKET_ERROR -1       /* code d'erreur des sockets */
 #define WINDOW_SIZE 500
+#define LIBRE 0
+#define EN_PARTIE 1
+#define A 0
+#define B 1
 
 void actualiser_damier_SDL(SDL_Renderer *renderer, int damier[10][10], int x, int y);
 void dessiner_ligne(SDL_Renderer *r, int x, int y, int w);
@@ -20,6 +24,13 @@ void dessiner_pion(SDL_Renderer *r, int cx, int cy, int rayon);
 void dessiner_dame(SDL_Renderer *r, int cx, int cy, int rayon);
 
 void creer_damier(int damier[10][10]);
+void string_to_damier(char buffer[BUFFSIZE], int damier[10][10]);
+int coup(char buffer[BUFFSIZE], int damier[10][10], int num_joueur);
+int remplissage_tab_coord(int tab_coord[20][2], char buffer[BUFFSIZE], int length);
+int test_int_buffer(char buffer[BUFFSIZE], int n);
+int deplacement_dame(int case_depart[2], int case_arrivee[2], int damier[10][10], int num_joueur);
+void damiercpy(int damier_tmp[10][10], int damier[10][10]);
+int moyenne (int a, int b);
 
 int connect_socket(char* adresse, int port);
 int recv_server(int sock, char *buffer);
@@ -34,12 +45,10 @@ int main(int argc, char* argv[]){
 
 	char* pseudo = argv[1];
 	int port = atoi(argv[2]);
-
-	//titre de la fenetre SDL
-	char title[BUFFSIZE];
-	memset(title, '\0', sizeof(title));
-	strcpy(title, "Damier de ");
-	strcat(title, pseudo);
+	int statut = LIBRE;
+	int num_joueur;
+	int tour;
+	int en_attente_de_damier = 0;
 
 	int i;
 
@@ -51,11 +60,19 @@ int main(int argc, char* argv[]){
 
 	//version abstraite du damier
 	int damier[10][10];
+	//damier temporaire
+	int damier_tmp[10][10];
 
 	/*SDL_Surface *ecran = NULL, *rectangle = NULL;*/
   SDL_Init(SDL_INIT_VIDEO);
 	SDL_Window* window = NULL;
-	SDL_Renderer* renderer = NULL;//Déclaration du renderer
+	SDL_Renderer* renderer = NULL;//Déclaration du
+
+	//titre de la fenetre SDL
+	char title[BUFFSIZE];
+	memset(title, '\0', sizeof(title));
+	strcpy(title, "Damier de ");
+	strcat(title, pseudo);
 
 
 	while(1) {
@@ -65,22 +82,35 @@ int main(int argc, char* argv[]){
 		}
 		//descripteurs de fichier
 		FD_ZERO(&readfds);
-    	FD_SET(sock, &readfds);
-    	FD_SET(STDIN_FILENO, &readfds);
+  	FD_SET(sock, &readfds);
+  	FD_SET(STDIN_FILENO, &readfds);
 
-    	int s = select(sock+1, &readfds,NULL,NULL,NULL);
-    	if(s==-1){
-    		perror("select");
-    		exit(-1);
-    	}
+  	int s = select(sock+1, &readfds,NULL,NULL,NULL);
+  	if(s==-1){
+  		perror("select");
+  		exit(-1);
+  	}
 
-    	if(FD_ISSET(sock, &readfds)){
+  	if(FD_ISSET(sock, &readfds)){
 
-    		recv_server(sock, buffer);
-    		printf("%s", buffer);
-
+  		recv_server(sock, buffer);
+  		printf("%s", buffer);
+			if(en_attente_de_damier == 1){
+				//C'est au tour du client
+				string_to_damier(buffer, damier);
+				actualiser_damier_SDL(renderer, damier, WINDOW_SIZE, WINDOW_SIZE);
+				SDL_RenderPresent(renderer);
+				tour = 1;
+				en_attente_de_damier = 0;
+			}
+			else{
 				//début d'une partie, le client est le joueur A
 				if(strcmp(buffer, "*** La partie commence : tu joues les pions rouges  ***\n") == 0){
+					statut = EN_PARTIE;
+					num_joueur = A;
+					tour = 1;
+					en_attente_de_damier = 0;
+
 					printf("*** A toi de jouer ! ***\n");
 					creer_damier(damier);
 
@@ -93,6 +123,11 @@ int main(int argc, char* argv[]){
 
 				//début d'une partie, le client est le joueur B
 				else if(strcmp(buffer, "*** La partie commence : tu joues les pions noirs  ***\n") == 0){
+					statut = EN_PARTIE;
+					num_joueur = B;
+					tour = 0;
+					en_attente_de_damier = 1;
+
 					creer_damier(damier);
 
 					SDL_CreateWindowAndRenderer(WINDOW_SIZE, WINDOW_SIZE, SDL_WINDOW_SHOWN, &window, &renderer);
@@ -102,8 +137,21 @@ int main(int argc, char* argv[]){
 					SDL_RenderPresent(renderer);
 				}
 
+				//validation du coup par le serveur
+				else if(strcmp(buffer, "***Coup valide***\n") == 0){
+					actualiser_damier_SDL(renderer, damier, WINDOW_SIZE, WINDOW_SIZE);
+					SDL_RenderPresent(renderer);
+					printf("***Votre adversaire joue ...***\n");
+					tour = 0;
+				}
+
+				else if(strcmp(buffer, "***A vous de jouer***\n") == 0){
+					en_attente_de_damier = 1;
+				}
+
 				//victoire
 				else if(strcmp(buffer, "Tu vois quand tu veux, t'es pas si mauvais !") == 0){
+					statut = LIBRE;
 					SDL_DestroyWindow(window);
 					SDL_DestroyRenderer(renderer); // Libération de la surface
 					SDL_Quit();
@@ -111,6 +159,7 @@ int main(int argc, char* argv[]){
 
 				//défaite
 				else if(strcmp(buffer, "Bon, on va rien dire ... (loser)") == 0){
+					statut = LIBRE;
 					SDL_DestroyWindow(window);
 					SDL_DestroyRenderer(renderer); // Libération de la surface
 					SDL_Quit();
@@ -120,21 +169,47 @@ int main(int argc, char* argv[]){
 				else if(strcmp(buffer, "au revoir\n") == 0){
 					break;
 				}
-    	}
+			}
+		}
 
-    	if(FD_ISSET(STDIN_FILENO, &readfds)){
+  	if(FD_ISSET(STDIN_FILENO, &readfds)){
 			//message à envoyer
-    		fgets(buffer, BUFFSIZE, stdin);
-    		buffer[strlen(buffer)-1]='\0';
+  		fgets(buffer, BUFFSIZE, stdin);
+  		buffer[strlen(buffer)-1]='\0';
+			printf("|%s|(%ld)\n", buffer, strlen(buffer));
 
 			//deconnexion
-    		if(strcmp(buffer, "/quit") == 0){
-    			break;
-    		}
-    		send_server(sock, buffer);
-    	}
-	}
+  		if(strcmp(buffer, "/quit") == 0){
+  			break;
+  		}
 
+			if(statut == LIBRE){
+				send_server(sock, buffer);
+			}
+
+			else if(statut == EN_PARTIE){
+				//abandon
+				if(strcmp(buffer, "/ff") == 0){
+					send_server(sock, buffer);
+				}
+				else if(tour == 1){
+
+					damiercpy(damier_tmp, damier);
+					//coup non valide
+					if(coup(buffer, damier_tmp, num_joueur) == 0){
+						printf("*** Coup non valide, rejouez ***\n");
+					}
+					//coup valide
+					else {
+						send_server(sock, buffer);
+						damiercpy(damier, damier_tmp);
+					}
+				}
+				else printf("Ce n'est pas votre tour\n");
+			}
+
+  	}
+	}
 	return 0;
 }
 
@@ -295,6 +370,420 @@ void creer_damier(int damier[10][10]){
       }
 		}
 	}
+}
+
+void string_to_damier(char buffer[BUFFSIZE], int damier[10][10]){
+	int i, j;
+	int tmp;
+	int k = 0;
+
+	for(i = 0; i < 10; i++){
+		for(j = 0; j < 10; j++){
+			//cases jouables
+			if(((i + j) % 2) == 1){
+				tmp = 0;
+				tmp = buffer[k] - '0';
+				damier[i][j] = tmp;
+				k++;
+			}
+			else damier[i][j] = -1;
+		}
+	}
+}
+
+int coup(char buffer[BUFFSIZE], int damier[10][10], int num_joueur){
+	int length = strlen(buffer);
+
+	int i, j;
+	int tab_coord[20][2];
+	//initialisation des coordonnées
+	for(i = 0; i < 20; i++){
+		for(j = 0; j < 2; j++){
+			tab_coord[i][j] = -1;
+		}
+	}
+
+	if(test_int_buffer(buffer, length) == 0){
+		return 0;
+	}
+
+	remplissage_tab_coord(tab_coord, buffer, length);
+
+	for(i = 0; i < 20; i++){
+		for(j = 0; j < 2; j++){
+			if(tab_coord[i][j] != -1){
+				printf("%d,", tab_coord[i][j]);
+			}
+		}
+		printf(" ");
+	}
+	printf("\n");
+
+	int case_depart[2];
+	int case_arrivee[2];
+
+	for(i = 0; i < 19; i++){
+		case_depart[0] = tab_coord[i][0];
+		case_depart[1] = tab_coord[i][1];
+		case_arrivee[0] = tab_coord[i+1][0];
+		case_arrivee[1] = tab_coord[i+1][1];
+		//coordonnées valides
+		if(case_depart[0] != -1 && tab_coord[i+1][0] != -1){
+			//case d'arrivée = libre
+			if(damier[case_arrivee[0]][case_arrivee[1]] == 0){
+				//joueur A
+				if(num_joueur == A){
+					//case depart = pion rouge
+					if(damier[case_depart[0]][case_depart[1]] == 3){
+						//déplacement normal
+						if((case_depart[0] - case_arrivee[0]) == 1 && ((case_arrivee[1] - case_depart[1]) == 1 || (case_arrivee[1] - case_depart[1]) == -1 )){
+							damier[case_depart[0]][case_depart[1]] = 0;
+							//le pion devient une dame
+							if(case_arrivee[0] == 0){
+								damier[case_arrivee[0]][case_arrivee[1]] = 4;
+							}
+							else damier[case_arrivee[0]][case_arrivee[1]] = 3;
+						}
+						//prise
+						else if(((case_depart[0] - case_arrivee[0]) == 2 || (case_depart[0] - case_arrivee[0]) == -2) && ((case_arrivee[1] - case_depart[1]) == 2 || (case_arrivee[1] - case_depart[1]) == -2 )){
+							//pion noir ou dame noire pris
+							if((damier[moyenne(case_depart[0],case_arrivee[0])][moyenne(case_depart[1],case_arrivee[1])] == 1) || (damier[moyenne(case_depart[0],case_arrivee[0])][moyenne(case_depart[1],case_arrivee[1])] == 2)){
+								damier[case_depart[0]][case_depart[1]] = 0;
+								damier[moyenne(case_depart[0],case_arrivee[0])][moyenne(case_depart[1],case_arrivee[1])] = 0;
+								//le pion devient une dame
+								if(case_arrivee[0] == 0){
+									damier[case_arrivee[0]][case_arrivee[1]] = 4;
+								}
+								else damier[case_arrivee[0]][case_arrivee[1]] = 3;
+							}
+							else {
+								printf("probleme prise\n");
+								return 0;
+							}
+						}
+
+						else{
+							printf("probleme case d'arrivée (ni déplacement ni prise)\n");
+							return 0;
+						}
+					}
+					//dame rouge
+					else if(damier[case_depart[0]][case_depart[1]] == 4){
+						if(deplacement_dame(case_depart, case_arrivee, damier, num_joueur) == 0){
+							return 0;
+						}
+					}
+
+					else{
+						printf("probleme case départ\n");
+						return 0;
+					}
+				}
+
+				//joueur B
+				else if(num_joueur == B){
+					//case depart = pion noir
+					if(damier[case_depart[0]][case_depart[1]] == 1){
+						//déplacement normal
+						if((case_depart[0] - case_arrivee[0]) == 1 && ((case_arrivee[1] - case_depart[1]) == 1 || (case_arrivee[1] - case_depart[1]) == -1 )){
+							damier[case_depart[0]][case_depart[1]] = 0;
+							//le pion devient une dame
+							if(case_arrivee[0] == 9){
+								damier[case_arrivee[0]][case_arrivee[1]] = 2;
+							}
+							else damier[case_arrivee[0]][case_arrivee[1]] = 1;
+						}
+						//prise
+						else if(((case_depart[0] - case_arrivee[0]) == 2 || (case_depart[0] - case_arrivee[0]) == -2) && ((case_arrivee[1] - case_depart[1]) == 2 || (case_arrivee[1] - case_depart[1]) == -2 )){
+							//pion rouge ou dame rouge pris
+							if((damier[moyenne(case_depart[0],case_arrivee[0])][moyenne(case_depart[1],case_arrivee[1])] == 3) || (damier[moyenne(case_depart[0],case_arrivee[0])][moyenne(case_depart[1],case_arrivee[1])] == 4)){
+								damier[case_depart[0]][case_depart[1]] = 0;
+								damier[moyenne(case_depart[0],case_arrivee[0])][moyenne(case_depart[1],case_arrivee[1])] = 0;
+								//le pion devient une dame
+								if(case_arrivee[0] == 9){
+									damier[case_arrivee[0]][case_arrivee[1]] = 2;
+								}
+								else damier[case_arrivee[0]][case_arrivee[1]] = 4;
+							}
+
+							else {
+								printf("probleme prise\n");
+								return 0;
+							}
+						}
+
+						else {
+							return 0;
+							printf("probleme case d'arrivée (ni déplacement ni prise)\n");
+						}
+					}
+					//dame noire
+					else if(damier[case_depart[0]][case_depart[1]] == 2){
+						if(deplacement_dame(case_depart, case_arrivee, damier, num_joueur) == 0){
+							return 0;
+						}
+					}
+
+					else{
+						printf("probleme case départ\n");
+						return 0;
+					}
+				}
+			}
+
+			else{
+				printf("probleme case d'arrivée (non libre)\n");
+				return 0;
+			}
+		}
+		else break;
+	}
+	return 1;
+}
+
+int remplissage_tab_coord(int tab_coord[20][2], char buffer[BUFFSIZE], int length){
+
+	int i;
+	int tmp = 0, k = 0;
+
+	//Remplissage
+	for(i = 0; i < 20; i++){
+		while(k < length){
+			tmp = 0;
+			tmp = buffer[k] - '0';
+			tab_coord[i][0] = tmp;
+			k += 2;
+
+			tmp = 0;
+			tmp = buffer[k] - '0';
+			tab_coord[i][1] = tmp;
+			k += 2;
+			break;
+		}
+	}
+	return 1;
+}
+
+int test_int_buffer(char buffer[BUFFSIZE], int n){
+
+	int tmp = 0;
+	int i;
+	if(n >= 7 && n <= 87){
+		for(i = 0; i < n; i++){
+			if((i % 2) == 0){
+				tmp = 0;
+				tmp = buffer[i] - '0';
+				if(tmp < 0 || tmp > 9){
+					return 0;
+				}
+			}
+			else if((i % 2) == 1){
+				if(buffer[i] != ',' && buffer[i] != ' '){
+					return 0;
+				}
+			}
+		}
+	}
+	else{
+		return 0;
+	}
+	//on peut analyser le coup
+	return 1;
+}
+
+int deplacement_dame(int case_depart[2], int case_arrivee[2], int damier[10][10], int num_joueur){
+	int i, j;
+
+	//joueur A
+	if(num_joueur == A){
+		//vers le haut gauche
+		if(case_depart[0] > case_arrivee[0] && case_depart[1] > case_arrivee[1]){
+			for(i = case_depart[0], j = case_depart[1]; i > case_arrivee[0] && j > case_arrivee[1]; i--, j--){
+				//pion allié
+				if(damier[i][j] == 3 || damier[i][j] == 4){
+					return 0;
+				}
+				//pion ennemi
+				else if(damier[i][j] == 1 || damier[i][j] == 2){
+					//la case d'apres doit etre libre
+					if(damier[i+1][j+1] != 0){
+						return 0;
+					}
+				}
+				else{
+					damier[i][j] = 0;
+				}
+			}
+			damier[case_arrivee[0]][case_arrivee[1]] = 4;
+			damier[case_depart[0]][case_depart[1]] = 0;
+		}
+		//vers le haut droite
+		else if(case_depart[0] > case_arrivee[0] && case_depart[1] < case_arrivee[1]){
+			for(i = case_depart[0], j = case_depart[1]; i > case_arrivee[0] && j < case_arrivee[1]; i--, j++){
+				//pion allié
+				if(damier[i][j] == 3 || damier[i][j] == 4){
+					return 0;
+				}
+				//pion ennemi
+				else if(damier[i][j] == 1 || damier[i][j] == 2){
+					//la case d'apres doit etre libre
+					if(damier[i+1][j+1] != 0){
+						return 0;
+					}
+				}
+				else{
+					damier[i][j] = 0;
+				}
+			}
+			damier[case_arrivee[0]][case_arrivee[1]] = 4;
+			damier[case_depart[0]][case_depart[1]] = 0;
+		}
+		//vers le bas gauche
+		else if(case_depart[0] < case_arrivee[0] && case_depart[1] > case_arrivee[1]){
+			for(i = case_depart[0], j = case_depart[1]; i < case_arrivee[0] && j > case_arrivee[1]; i++, j--){
+				//pion allié
+				if(damier[i][j] == 3 || damier[i][j] == 4){
+					return 0;
+				}
+				//pion ennemi
+				else if(damier[i][j] == 1 || damier[i][j] == 2){
+					//la case d'apres doit etre libre
+					if(damier[i+1][j+1] != 0){
+						return 0;
+					}
+				}
+				else{
+					damier[i][j] = 0;
+				}
+			}
+			damier[case_arrivee[0]][case_arrivee[1]] = 4;
+			damier[case_depart[0]][case_depart[1]] = 0;
+		}
+		//vers le bas droite
+		else if(case_depart[0] < case_arrivee[0] && case_depart[1] < case_arrivee[1]){
+			for(i = case_depart[0], j = case_depart[1]; i < case_arrivee[0] && j < case_arrivee[1]; i++, j++){
+				//pion allié
+				if(damier[i][j] == 3 || damier[i][j] == 4){
+					return 0;
+				}
+				//pion ennemi
+				else if(damier[i][j] == 1 || damier[i][j] == 2){
+					//la case d'apres doit etre libre
+					if(damier[i+1][j+1] != 0){
+						return 0;
+					}
+				}
+				else{
+					damier[i][j] = 0;
+				}
+			}
+			damier[case_arrivee[0]][case_arrivee[1]] = 4;
+			damier[case_depart[0]][case_depart[1]] = 0;
+		}
+		return 0;
+	}
+	//joueur B
+	else{
+		//vers le haut gauche
+		if(case_depart[0] > case_arrivee[0] && case_depart[1] > case_arrivee[1]){
+			for(i = case_depart[0], j = case_depart[1]; i > case_arrivee[0] && j > case_arrivee[1]; i--, j--){
+				//pion allié
+				if(damier[i][j] == 1 || damier[i][j] == 2){
+					return 0;
+				}
+				//pion ennemi
+				else if(damier[i][j] == 3 || damier[i][j] == 4){
+					//la case d'apres doit etre libre
+					if(damier[i+1][j+1] != 0){
+						return 0;
+					}
+				}
+				else{
+					damier[i][j] = 0;
+				}
+			}
+			damier[case_arrivee[0]][case_arrivee[1]] = 2;
+			damier[case_depart[0]][case_depart[1]] = 0;
+		}
+		//vers le haut droite
+		else if(case_depart[0] > case_arrivee[0] && case_depart[1] < case_arrivee[1]){
+			for(i = case_depart[0], j = case_depart[1]; i > case_arrivee[0] && j < case_arrivee[1]; i--, j++){
+				//pion allié
+				if(damier[i][j] == 1 || damier[i][j] == 2){
+					return 0;
+				}
+				//pion ennemi
+				else if(damier[i][j] == 3 || damier[i][j] == 4){
+					//la case d'apres doit etre libre
+					if(damier[i+1][j+1] != 0){
+						return 0;
+					}
+				}
+				else{
+					damier[i][j] = 0;
+				}
+			}
+			damier[case_arrivee[0]][case_arrivee[1]] = 2;
+			damier[case_depart[0]][case_depart[1]] = 0;
+		}
+		//vers le bas gauche
+		else if(case_depart[0] < case_arrivee[0] && case_depart[1] > case_arrivee[1]){
+			for(i = case_depart[0], j = case_depart[1]; i < case_arrivee[0] && j > case_arrivee[1]; i++, j--){
+				//pion allié
+				if(damier[i][j] == 1 || damier[i][j] == 2){
+					return 0;
+				}
+				//pion ennemi
+				else if(damier[i][j] == 3 || damier[i][j] == 4){
+					//la case d'apres doit etre libre
+					if(damier[i+1][j+1] != 0){
+						return 0;
+					}
+				}
+				else{
+					damier[i][j] = 0;
+				}
+			}
+			damier[case_arrivee[0]][case_arrivee[1]] = 2;
+			damier[case_depart[0]][case_depart[1]] = 0;
+		}
+		//vers le bas droite
+		else if(case_depart[0] < case_arrivee[0] && case_depart[1] < case_arrivee[1]){
+			for(i = case_depart[0], j = case_depart[1]; i < case_arrivee[0] && j < case_arrivee[1]; i++, j++){
+				//pion allié
+				if(damier[i][j] == 1 || damier[i][j] == 2){
+					return 0;
+				}
+				//pion ennemi
+				else if(damier[i][j] == 3 || damier[i][j] == 4){
+					//la case d'apres doit etre libre
+					if(damier[i+1][j+1] != 0){
+						return 0;
+					}
+				}
+				else{
+					damier[i][j] = 0;
+				}
+			}
+			damier[case_arrivee[0]][case_arrivee[1]] = 2;
+			damier[case_depart[0]][case_depart[1]] = 0;
+		}
+		else return 0;
+	}
+	return 1;
+}
+
+void damiercpy(int damier_tmp[10][10], int damier[10][10]){
+	int i, j;
+	for(i = 0; i < 10; i++){
+		for(j = 0; j < 10; j++){
+			damier_tmp[i][j] = damier[i][j];
+		}
+	}
+}
+
+int moyenne (int a, int b){
+	return (a+b)/2;
 }
 
 int connect_socket(char* adresse, int port){

@@ -35,6 +35,7 @@ struct Partie{
 	struct Client spec[8];
 };
 
+void damier_to_string(char buffer[50], int damier[10][10]);
 struct Partie creer_partie(struct Client joueurA, struct Client joueurB);
 int verif_pseudo(struct Client conserv[MAX_CLIENT], char pseudo[BUFFSIZE], int nb_c);
 int defi(char buffer[BUFFSIZE]);
@@ -81,8 +82,6 @@ int main(int argc, char* argv[]){
 
 	int i, j, r;
 	char result[1];
-
-	struct Client *adversaire = NULL;
 
 	char buffer[BUFFSIZE];
 	char msgadieu[BUFFSIZE] = " quitte ce lieu maudit ***\n";
@@ -443,7 +442,9 @@ int main(int argc, char* argv[]){
 
 						struct Partie* partie_tmp2;
 						partie_tmp2 = conserv[i].partie_en_cours;
-						adversaire = conserv[i].adversaire;
+
+						char damier_string[50];
+
 
 						//abandon du joueur
 						if(strcmp(buffer, "/ff") == 0){
@@ -460,17 +461,30 @@ int main(int argc, char* argv[]){
 							send_client(conserv[i].csock, "*** Ce n'est pas tour, un peu de patience ! ***\n");
 						}
 
+						/* COUP DU JOUEUR */
 						else{
 
 
-							/* COUP DU JOUEUR */
 
 
+							//coup valide
+							send_client(conserv[i].csock, "***Coup valide***\n");
+							conserv[i].partie_en_cours = partie_tmp2;
+
+							//on prévient l'adversaire
+							for(j = 0; j < nb_c; j++){
+								if(strcmp(conserv[i].adversaire->pseudo, conserv[j].pseudo) == 0){
+									send_client(conserv[j].csock, "***A vous de jouer***\n");
+									conserv[j].partie_en_cours = partie_tmp2;
+									damier_to_string(damier_string, conserv[j].partie_en_cours->damier);
+									send_client(conserv[j].csock, damier_string);
+								}
+							}
 
 							//Fin du tour
 							conserv[i].tour = 2;
 							for(j = 0; j < nb_c; j++){
-								if(strcmp(adversaire->pseudo, conserv[j].pseudo) == 0){
+								if(strcmp(conserv[i].adversaire->pseudo, conserv[j].pseudo) == 0){
 									conserv[j].tour = 1;
 								}
 							}
@@ -623,6 +637,21 @@ int main(int argc, char* argv[]){
 		}
 	}
 	return 0;
+}
+
+void damier_to_string(char buffer[50], int damier[10][10]){
+	int i, j;
+	char tmp[1];
+
+	for(i = 0; i < 10; i++){
+		for(j = 0; j < 10; j++){
+			//cases jouables
+			if(((i + j) % 2) == 1){
+				strcat(buffer, inttos(tmp, damier[i][j]));
+			}
+		}
+	}
+	buffer[50] = '\0';
 }
 
 struct Partie creer_partie(struct Client joueurA, struct Client joueurB){
