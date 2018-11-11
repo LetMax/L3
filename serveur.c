@@ -35,6 +35,7 @@ struct Partie{
 	struct Client spec[8];
 };
 
+void string_to_damier(char buffer[50], int damier[10][10]);
 void damier_to_string(char buffer[50], int damier[10][10]);
 struct Partie creer_partie(struct Client joueurA, struct Client joueurB);
 int verif_pseudo(struct Client conserv[MAX_CLIENT], char pseudo[BUFFSIZE], int nb_c);
@@ -80,7 +81,7 @@ int main(int argc, char* argv[]){
 
 	fd_set readfds;
 
-	int i, j, r;
+	int i, j, r, k;
 	char result[1];
 
 	char buffer[BUFFSIZE];
@@ -442,9 +443,7 @@ int main(int argc, char* argv[]){
 
 						struct Partie* partie_tmp2;
 						partie_tmp2 = conserv[i].partie_en_cours;
-
-						char damier_string[50];
-
+						string_to_damier(buffer, partie_tmp2 -> damier);
 
 						//abandon du joueur
 						if(strcmp(buffer, "/ff") == 0){
@@ -456,15 +455,10 @@ int main(int argc, char* argv[]){
 							}
 						}
 
-						//test si c'est son tour
-						else if(conserv[i].tour == 2){
-							send_client(conserv[i].csock, "*** Ce n'est pas tour, un peu de patience ! ***\n");
-						}
-
 						/* COUP DU JOUEUR */
 						else{
 
-
+							char damier_string_send[50];
 
 
 							//coup valide
@@ -474,10 +468,15 @@ int main(int argc, char* argv[]){
 							//on prévient l'adversaire
 							for(j = 0; j < nb_c; j++){
 								if(strcmp(conserv[i].adversaire->pseudo, conserv[j].pseudo) == 0){
-									send_client(conserv[j].csock, "***A vous de jouer***\n");
 									conserv[j].partie_en_cours = partie_tmp2;
-									damier_to_string(damier_string, conserv[j].partie_en_cours->damier);
-									send_client(conserv[j].csock, damier_string);
+
+									damier_to_string(damier_string_send, conserv[j].partie_en_cours->damier);
+									printf("Damier envoyé = |");
+									for(k = 0; k<50; k++){
+										printf("%c", damier_string_send[k]);
+									}
+									printf("|\n");
+									send_client(conserv[j].csock, damier_string_send);
 								}
 							}
 
@@ -639,15 +638,38 @@ int main(int argc, char* argv[]){
 	return 0;
 }
 
-void damier_to_string(char buffer[50], int damier[10][10]){
+void string_to_damier(char buffer[50], int damier[10][10]){
 	int i, j;
-	char tmp[1];
+	int tmp;
+	int k = 0;
 
 	for(i = 0; i < 10; i++){
 		for(j = 0; j < 10; j++){
 			//cases jouables
 			if(((i + j) % 2) == 1){
-				strcat(buffer, inttos(tmp, damier[i][j]));
+				tmp = 0;
+				tmp = buffer[k] - '0';
+				damier[i][j] = tmp;
+				k++;
+			}
+			else damier[i][j] = -1;
+		}
+	}
+}
+
+void damier_to_string(char buffer[50], int damier[10][10]){
+	int i, j;
+	char tmp[1];
+  int k = 0;
+
+	for(i = 0; i < 10; i++){
+		for(j = 0; j < 10; j++){
+			//cases jouables
+			if(((i + j) % 2) == 1){
+				tmp[0] = damier[i][j] + '0';
+        buffer[k] = tmp[0];
+        printf("On a ajouté |%c| au buffer\n", buffer[k]);
+        k++;
 			}
 		}
 	}
