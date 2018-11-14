@@ -1,0 +1,58 @@
+LETERRE Maxime & MAGHALAES Carine
+
+Rapport jeu de dames :
+
+pour compiler : make
+pour executer le serveur : ./serveur port (exemple : "./serveur 3000")
+pour executer un client : ./client pseudo port (exemple : "./client toto 3000")
+
+Choix techniques :
+
+Les damiers sont implémentés en matrice d'entiers de 10 par 10 avec un chiffre pour
+représenter un pion.
+Utilisation de la bibliotèque SDL 2.0 pour l'affichage du plateau.
+Le statut des joueurs est aussi géré par des entiers.
+
+Explications du programme :
+
+Le serveur attends la connexion des clients (ici 10).
+Un client peut soit se connecter, soit creer un compte ou se connecter en tant qu'invité.
+La gestion des comptes se fait grace au fichier "comptes.txt" où se situent tous les pseudos
+suivis de leur mot de passe. A chaque tentative de connexion, on analyse ce fichier.
+
+On conserve les joueurs connectés dans un tableau (conserv) mais aussi les joueurs en instance
+de connexion dans un autre tableau (conserv_bis) ce qui facilite la gestion de connexion.
+
+Une fois le joueur connecté, il est placé en attente dans un salon de discussion avec tous les
+autres joueurs en attente. Un joueur connecté est informé de toutes les connexions ou deconnexions
+et peut s'afficher la liste des joueurs connectés ainsi que leur statut avec la commande "/liste".
+Il peut se déconnecter avec la commande "/quit".
+
+Tous les joueurs ont un numéro qui leur est attribué à leur connexion.
+Pour défier un joueur, il suffit de rentrer la commande "/battle" suivie d'un espace puis du
+numérodu joueur à difié (par exemple : "/battle 2"). Le joueur defié peut accepter (/accept)
+ou refuser (/refuse) le défi.
+
+Une fois la partie lancée, les deux joueurs peuvent abandonner avec la commande "/ff".
+Les joueurs en attentes peuvent passer en mode spectateur d'une partie avec la commandes
+"/spactate" suivie d'un espace et du numéro d'un des deux joueurs de la partie.
+Il peut quitter ce mode avant la fin de la partie avec "/exit".
+
+Le coup d'un joueur en partie doit être de la forme : "x1,y1 x2,y2 x3,y3 ..." avec x
+l'abscisse et y l'ordonée (x et y vont de 0 à 9). Chaque coordonnée (couple x,y) représente
+une case par laquelle le pion joué va passer durant ce coup. Autrement dit, x1,y1 représente
+la case de départ donc le pion joué et x2,y2 la case d'arrivée si il s'agit d'un déplacement
+simple ou d'une prise d'un seul pion. Si le coup représente un prise multiple, il faut
+indiquer toutes les cases par lesquelles le pion va passer.
+
+Types de messages utilisés :
+
+On utilise des chaines de caractères pour transmettre les informations entre les clients
+et le serveur.
+
+Chronogramme  lors d'une partie :
+
+le coup du joueur A est testé par le client,
+s'il est correct, il est envoyé au serveur puis testé par lui ce dernier,
+si le serveur le juge correct, il envoie le damier modifié aux joueurs et aux spectateurs.
+le coup du joueur B est testé par le client, etc ...
