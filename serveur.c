@@ -1,66 +1,18 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#include <regex.h>
+/* TODO
 
-#define h_addr h_addr_list[0]
-#define BUFFSIZE 100          /* taille des buffers envoyés */
-#define SOCKET_ERROR -1       /* code d'erreur des sockets */
-#define MAX_CLIENT 10
+TOUT L'AFFICHAGE
+RAPPORT
+INDENTATION
 
-struct Client{
-	int give_mdp; //0 : ne doit pas encore le donner | 1 : le rentre pour la premiere fois | 2 : se connecte avec
-  char pseudo[BUFFSIZE];
-  int csock;
-	char mdp[BUFFSIZE];
-	int statut; //0 : libre | 1 : en attente d'un défi | 2 : entrain de jouer
-	int tour; //1 : le joueur a la main | 2 : l'adversaire a la main
-	struct Client *adversaire;
-	struct Partie *partie_en_cours;
-};
+*/
 
-struct Partie{
-  int damier[10][10]; // 0 : case vide | 1 : pion noir | 2 : dame noire | 3 : pion rouge | 4 : dame rouge
-	//possède les pions rouges (joue en premier)
-	struct Client joueurA;
-	int pions_A;
-	//possède les pions noirs (joue en deuxieme)
-	struct Client joueurB;
-	int pions_B;
-	struct Client spec[8];
-};
-
-void string_to_damier(char buffer[50], int damier[10][10]);
-void damier_to_string(char buffer[50], int damier[10][10]);
-struct Partie creer_partie(struct Client joueurA, struct Client joueurB);
-int verif_pseudo(struct Client conserv[MAX_CLIENT], char pseudo[BUFFSIZE], int nb_c);
-int defi(char buffer[BUFFSIZE]);
-int match_str_reg(const char *string, const char *pattern);
-char* inttos(char result[1], int j);
-void afficher_clients(struct Client tab[MAX_CLIENT], int nb_c);
-int listen_socket(int port);
-struct Client add_client(int sock, int* max_fd, int* nb_c);
-struct Client add_client_connect(struct Client client, int* max_fd, int* nb_c);
-void rmv_client(struct Client* clients, int i_to_remove, int* nb_c);
-void rmv_client_en_connect(struct Client* clients, int i_to_remove, int* nb_c);
-int recv_client(int csock, char *buffer);
-int send_client(int csock, char *buffer);
-void infos_client(struct Client c);
-void liste_joueurs(struct Client tab[MAX_CLIENT], int nb_c, char result[1]);
-void ajouter_joueur_fichier(FILE* fichier, struct Client client);
-int verif_pseudo_fichier(FILE* fichier, char pseudo[BUFFSIZE]);
-int test_mdp(FILE* fichier, char pseudo[BUFFSIZE], char mdp[BUFFSIZE]);
+#include "serveur.h"
 
 int main(int argc, char* argv[]){
 
 	if(argc != 2) {
        printf("L'appel doit etre de type %s port\n",argv[0]);
-       exit(-1);
+	   exit(-1);
    	}
 
 	int port = atoi(argv[1]);
@@ -81,7 +33,7 @@ int main(int argc, char* argv[]){
 
 	fd_set readfds;
 
-	int i, j, r, k;
+	int i, j, k, r;
 	char result[1];
 
 	char buffer[BUFFSIZE];
@@ -132,7 +84,7 @@ int main(int argc, char* argv[]){
 		for(i = 0; i < nb_cc; i++){
 			//joueur entrain de se connecter
 			if(FD_ISSET(conserv_bis[i].csock, &readfds)){
-		  		r = recv_client(conserv_bis[i].csock, buffer);
+		  	r = recv_client(conserv_bis[i].csock, buffer);
 				if(r!=0){
 
 					if(conserv_bis[i].give_mdp == 0){
@@ -255,8 +207,12 @@ int main(int argc, char* argv[]){
 					//message d'un joueur libre
 					if(conserv[i].statut == 0){
 
+						if(strcmp(buffer, "/liste") == 0){
+							liste_joueurs_i(conserv, nb_c, result, i);
+						}
+
 						//un joueur veut un défi
-						if((defi(buffer)) == 0){
+						else if((defi(buffer)) == 0){
 							joueur_d = 0;
 							joueur_d = buffer[8] - '0';
 							if(joueur_d >= 0 && joueur_d < nb_c){
@@ -316,6 +272,47 @@ int main(int argc, char* argv[]){
 								send_client(conserv[i].csock, "*** Vous défiez un fantome (personne en gros) ***\n");
 							}
 						}
+						else if(spectate(buffer) == 0){
+							int joueur_en_jeu = 0;
+							joueur_en_jeu = buffer[10] - '0';
+
+							if(joueur_en_jeu >= 0 && joueur_en_jeu < nb_c){
+								if(conserv[joueur_en_jeu].statut == 2){
+									if(conserv[joueur_en_jeu].partie_en_cours->nb_spec < 7){
+
+										char first_string_send[50];
+
+										//message au spectateur
+										send_client(conserv[i].csock, "*** Vous observez ");
+										send_client(conserv[i].csock, conserv[joueur_en_jeu].pseudo);
+										send_client(conserv[i].csock, " Vs ");
+										send_client(conserv[i].csock, conserv[joueur_en_jeu].adversaire->pseudo);
+										send_client(conserv[i].csock, " ***\n");
+										send_client(conserv[i].csock, "*** Mode spectateur ***\n");
+
+										//mise à jour de la partie en cours des joueurs
+										conserv[joueur_en_jeu].partie_en_cours->spec[conserv[joueur_en_jeu].partie_en_cours->nb_spec] = conserv[i];
+										conserv[joueur_en_jeu].partie_en_cours->nb_spec++;
+										conserv[joueur_en_jeu].adversaire->partie_en_cours = conserv[joueur_en_jeu].partie_en_cours;
+										conserv[i].statut = 3;
+										conserv[i].partie_en_cours = conserv[joueur_en_jeu].partie_en_cours;
+										damier_to_string(first_string_send, conserv[i].partie_en_cours->damier);
+										send_client(conserv[i].csock, first_string_send);
+
+									}
+									else{
+										send_client(conserv[i].csock, "*** Trop de gens regardent deja cette partie ***\n");
+									}
+								}
+								else{
+									send_client(conserv[i].csock, "*** Ce joueur n'est pas en partie ***\n");
+								}
+							}
+							else{
+								send_client(conserv[i].csock, "*** Vous voulez observer un fantome (personne en gros) ***\n");
+							}
+
+						}
 						else {
 							//message d'un joueur dans le chat
 							for(j=0;j<nb_c;j++){
@@ -365,10 +362,8 @@ int main(int argc, char* argv[]){
 									partie_tmp = creer_partie(conserv[i], conserv[j]);
 
 									conserv[i].partie_en_cours = &partie_tmp;
-									conserv[i].tour = 1;
 
 									conserv[j].partie_en_cours = &partie_tmp;
-									conserv[j].tour = 2;
 
 									//Les deux joueurs passent "en partie"
 									conserv[i].statut = 2;
@@ -443,7 +438,8 @@ int main(int argc, char* argv[]){
 
 						struct Partie* partie_tmp2;
 						partie_tmp2 = conserv[i].partie_en_cours;
-						string_to_damier(buffer, partie_tmp2 -> damier);
+
+						char damier_string_send[50];
 
 						//abandon du joueur
 						if(strcmp(buffer, "/ff") == 0){
@@ -458,39 +454,72 @@ int main(int argc, char* argv[]){
 						/* COUP DU JOUEUR */
 						else{
 
-							char damier_string_send[50];
+							if(strcmp(partie_tmp2->joueurA.pseudo, conserv[i].pseudo) == 0){
+								if(coup(buffer, partie_tmp2->damier, 0) == 0){
+									//coup non valide du joueur A
+									send_client(conserv[i].csock, "***Coup non valide, rejouez***\n");
+								}
+								//coup valide
+								else{
+									send_client(conserv[i].csock, "***Coup valide***\n");
+									conserv[i].partie_en_cours = partie_tmp2;
 
-
-							//coup valide
-							send_client(conserv[i].csock, "***Coup valide***\n");
-							conserv[i].partie_en_cours = partie_tmp2;
-
-							//on prévient l'adversaire
-							for(j = 0; j < nb_c; j++){
-								if(strcmp(conserv[i].adversaire->pseudo, conserv[j].pseudo) == 0){
-									conserv[j].partie_en_cours = partie_tmp2;
-
-									damier_to_string(damier_string_send, conserv[j].partie_en_cours->damier);
-									printf("Damier envoyé = |");
-									for(k = 0; k<50; k++){
-										printf("%c", damier_string_send[k]);
+									//on prévient l'adversaire
+									for(j = 0; j < nb_c; j++){
+										if(strcmp(conserv[i].adversaire->pseudo, conserv[j].pseudo) == 0){
+											conserv[j].partie_en_cours = partie_tmp2;
+											damier_to_string(damier_string_send, conserv[j].partie_en_cours->damier);
+											send_client(conserv[j].csock, damier_string_send);
+										}
 									}
-									printf("|\n");
-									send_client(conserv[j].csock, damier_string_send);
+									//on gere les spectateurs
+									for(j = 0; j < partie_tmp2->nb_spec; j++){
+										send_client(partie_tmp2->spec[j].csock, damier_string_send);
+									}
 								}
 							}
+							else{
+								if(coup(buffer, partie_tmp2->damier, 1) == 0){
+									//coup non valide du joueur B
+									send_client(conserv[i].csock, "***Coup non valide, rejouez***\n");
+								}
+								//coup valide
+								else{
+									send_client(conserv[i].csock, "***Coup valide***\n");
+									conserv[i].partie_en_cours = partie_tmp2;
 
-							//Fin du tour
-							conserv[i].tour = 2;
-							for(j = 0; j < nb_c; j++){
-								if(strcmp(conserv[i].adversaire->pseudo, conserv[j].pseudo) == 0){
-									conserv[j].tour = 1;
+									//on prévient l'adversaire
+									for(j = 0; j < nb_c; j++){
+										if(strcmp(conserv[i].adversaire->pseudo, conserv[j].pseudo) == 0){
+											conserv[j].partie_en_cours = partie_tmp2;
+											damier_to_string(damier_string_send, conserv[j].partie_en_cours->damier);
+											send_client(conserv[j].csock, damier_string_send);
+										}
+									}
+									//on gere les spectateurs
+									for(j = 0; j < partie_tmp2->nb_spec; j++){
+										send_client(partie_tmp2->spec[j].csock, damier_string_send);
+									}
 								}
 							}
 						}
 
+						//actualisation du damier
+						actualiser_pions_damier(partie_tmp2->damier, partie_tmp2->pions_A, partie_tmp2->pions_B);
+
 						/* TEST SI LA PARTIE EST FINIE */
 						if(partie_tmp2->pions_A <= 0){
+
+							//on prévient les spectateurs
+							for(j = 0; j < partie_tmp2->nb_spec; j++){
+								send_client(partie_tmp2->spec[j].csock, "*** FIN DE PARTIE ***\n");
+								for(k = 0; k < nb_c; k++){
+									if(strcmp(partie_tmp2->spec[j].pseudo, conserv[k].pseudo) == 0){
+										conserv[k].statut = 0;
+									}
+								}
+							}
+
 							//le joueur A a perdu
 							for(j = 0; j < nb_c; j++){
 								//on prévient les autres
@@ -519,24 +548,20 @@ int main(int argc, char* argv[]){
 
 									if(strcmp(conserv[i].pseudo, partie_tmp2->joueurA.pseudo)){
 										//message de fin de partie
-										send_client(conserv[i].csock, "*** ");
-										send_client(conserv[i].csock, "Tu vois quand tu veux, t'es pas si mauvais !");
-										send_client(conserv[i].csock, " ***\n");
+										send_client(conserv[i].csock, "*** FIN DE PARTIE ***\n");
+										send_client(conserv[i].csock, "*** Bravo vous avez gagné !***\n");
 
-										send_client(conserv[j].csock, "*** ");
-										send_client(conserv[j].csock, "Bon, on va rien dire ... (loser)");
-										send_client(conserv[j].csock, " ***\n");
+										send_client(conserv[j].csock, "*** FIN DE PARTIE ***\n");
+										send_client(conserv[j].csock, "*** Vous avez perdu, c'est un peu triste ***\n");
 									}
 
 									else{
 										//message de fin de partie
-										send_client(conserv[j].csock, "*** ");
-										send_client(conserv[j].csock, "Tu vois quand tu veux, t'es pas si mauvais !");
-										send_client(conserv[j].csock, " ***\n");
+										send_client(conserv[j].csock, "*** FIN DE PARTIE ***\n");
+										send_client(conserv[j].csock, "*** Bravo vous avez gagné !***\n");
 
-										send_client(conserv[i].csock, "*** ");
-										send_client(conserv[i].csock, "Bon, on va rien dire ... (loser)");
-										send_client(conserv[i].csock, " ***\n");
+										send_client(conserv[i].csock, "*** FIN DE PARTIE ***\n");
+										send_client(conserv[i].csock, "*** Vous avez perdu, c'est un peu triste ***\n");
 									}
 
 									conserv[i].adversaire = NULL;
@@ -552,6 +577,12 @@ int main(int argc, char* argv[]){
 							}
 						}
 						else if(partie_tmp2->pions_B <= 0){
+
+							//on prévient les spectateurs
+							for(j = 0; j < partie_tmp2->nb_spec; j++){
+								send_client(partie_tmp2->spec[j].csock, "*** FIN DE PARTIE ***\n");
+							}
+
 							//le joueur B a perdu
 							for(j = 0; j < nb_c; j++){
 								//on prévient les autres
@@ -581,24 +612,20 @@ int main(int argc, char* argv[]){
 
 									if(strcmp(conserv[i].pseudo, partie_tmp2->joueurA.pseudo)){
 										//message de fin de partie
-										send_client(conserv[j].csock, "*** ");
-										send_client(conserv[j].csock, "Tu vois quand tu veux, t'es pas si mauvais !");
-										send_client(conserv[j].csock, " ***\n");
+										send_client(conserv[j].csock, "*** FIN DE PARTIE ***\n");
+										send_client(conserv[j].csock, "*** Bravo vous avez gagné !***\n");
 
-										send_client(conserv[i].csock, "*** ");
-										send_client(conserv[i].csock, "Bon, on va rien dire ... (loser)");
-										send_client(conserv[i].csock, " ***\n");
+										send_client(conserv[i].csock, "*** FIN DE PARTIE ***\n");
+										send_client(conserv[i].csock, "*** Vous avez perdu, c'est un peu triste ***\n");
 									}
 
 									else{
 										//message de fin de partie
-										send_client(conserv[i].csock, "*** ");
-										send_client(conserv[i].csock, "Tu vois quand tu veux, t'es pas si mauvais !");
-										send_client(conserv[i].csock, " ***\n");
+										send_client(conserv[i].csock, "*** FIN DE PARTIE ***\n");
+										send_client(conserv[i].csock, "*** Bravo vous avez gagné !***\n");
 
-										send_client(conserv[j].csock, "*** ");
-										send_client(conserv[j].csock, "Bon, on va rien dire ... (loser)");
-										send_client(conserv[j].csock, " ***\n");
+										send_client(conserv[j].csock, "*** FIN DE PARTIE ***\n");
+										send_client(conserv[j].csock, "*** Vous avez perdu, c'est un peu triste ***\n");
 									}
 
 									conserv[i].adversaire = NULL;
@@ -612,6 +639,47 @@ int main(int argc, char* argv[]){
 									break;
 								}
 							}
+						}
+					}
+					//message d'un spectateur
+					else if(conserv[i].statut == 3){
+						if(strcmp(buffer, "/exit") == 0){
+
+							struct Partie* partie_quittee = NULL;
+							partie_quittee = conserv[i].partie_en_cours;
+							int i_remove;
+
+							//on retrouve le spectateur qui veut quitter dans le tableau des spectateurs
+							for(j = 0; j < partie_quittee->nb_spec; j++){
+								if(strcmp(conserv[i].pseudo, partie_quittee->spec[j].pseudo) == 0){
+									i_remove = j;
+									break;
+								}
+							}
+
+							//on le retire
+							for(j = i_remove; j < partie_quittee->nb_spec; j++){
+								partie_quittee->spec[j] = partie_quittee->spec[j+1];
+							}
+
+							partie_quittee->nb_spec--;
+
+							//on retrouve les joueurs qu'il observait pour mettre à jour leur partie_en_cours
+							for(j = 0; j < nb_c; j++){
+								if(strcmp(conserv[i].partie_en_cours->joueurA.pseudo,conserv[j].pseudo) == 0){
+									conserv[j].partie_en_cours = partie_quittee;
+								}
+							}
+
+							for(j = 0; j < nb_c; j++){
+								if(strcmp(conserv[i].partie_en_cours->joueurB.pseudo,conserv[j].pseudo) == 0){
+									conserv[j].partie_en_cours = partie_quittee;
+								}
+							}
+							send_client(conserv[i].csock, "*** FIN DE PARTIE ***\n");
+
+							conserv[i].statut = 0;
+							conserv[i].partie_en_cours = NULL;
 						}
 					}
 				}
@@ -635,330 +703,5 @@ int main(int argc, char* argv[]){
 			}
 		}
 	}
-	return 0;
-}
-
-void string_to_damier(char buffer[50], int damier[10][10]){
-	int i, j;
-	int tmp;
-	int k = 0;
-
-	for(i = 0; i < 10; i++){
-		for(j = 0; j < 10; j++){
-			//cases jouables
-			if(((i + j) % 2) == 1){
-				tmp = 0;
-				tmp = buffer[k] - '0';
-				damier[i][j] = tmp;
-				k++;
-			}
-			else damier[i][j] = -1;
-		}
-	}
-}
-
-void damier_to_string(char buffer[50], int damier[10][10]){
-	int i, j;
-	char tmp[1];
-  int k = 0;
-
-	for(i = 0; i < 10; i++){
-		for(j = 0; j < 10; j++){
-			//cases jouables
-			if(((i + j) % 2) == 1){
-				tmp[0] = damier[i][j] + '0';
-        buffer[k] = tmp[0];
-        printf("On a ajouté |%c| au buffer\n", buffer[k]);
-        k++;
-			}
-		}
-	}
-	buffer[50] = '\0';
-}
-
-struct Partie creer_partie(struct Client joueurA, struct Client joueurB){
-
-	int i, j;
-
-	struct Partie partie;
-
-	partie.joueurA = joueurA;
-	partie.joueurB = joueurB;
-	partie.pions_A = 20;
-	partie.pions_B = 20;
-
-	for(i = 0; i < 10; i++){
-		for(j = 0; j < 10; j++){
-			//cases jouables
-			if(((i + j) % 2) == 1){
-				//joueur A (en haut du damier, pions noirs)
-				if(i < 4){
-					partie.damier[i][j] = 1;
-				}
-				//cases vides du milieu
-				else if(i < 6){
-					partie.damier[i][j] = 0;
-				}
-				//joueur B (en bas du damier, pions rouges)
-				else {
-					partie.damier[i][j] = 3;
-				}
-			}
-		}
-	}
-
-
-	return partie;
-}
-
-int verif_pseudo(struct Client conserv[MAX_CLIENT], char pseudo[BUFFSIZE], int nb_c){
-
-	int cpt = 0;
-
-	int i;
-	for(i = 0; i < nb_c; i++){
-		if(strcmp(conserv[i].pseudo, pseudo) == 0){
-			cpt++;
-		}
-	}
-
-	return cpt;
-}
-
-int defi(char buffer[BUFFSIZE]){
-	if(buffer[0] == '/' && buffer[1] == 'b' && buffer[2] == 'a' && buffer[3] == 't' && buffer[4] == 't' && buffer[5] == 'l' && buffer[6] == 'e'){
-		return 0;
-	}
-	return 1;
-}
-
-int match_str_reg(const char *string, const char *pattern){
-    regex_t re;
-    if (regcomp(&re, pattern, REG_EXTENDED|REG_NOSUB) != 0) return 0;
-    int status = regexec(&re, string, 0, NULL, 0);
-    regfree(&re);
-    if (status != 0) return 0;
-    return 1;
-}
-
-char* inttos(char result[1], int j){
-	sprintf(result, "%d", j);
-	return result;
-}
-
-
-void afficher_clients(struct Client tab[MAX_CLIENT], int nb_c){
-
-	printf("--- Clients connectés ---\n");
-	int i;
-	for(i = 0; i < nb_c; i++){
-		printf("joueur %d : %s\n", i, tab[i].pseudo);
-	}
-	printf("-------------------------\n");
-}
-
-int listen_socket(int port){
-
-	int sock = socket(AF_INET, SOCK_STREAM, 0); /* créé un socket TCP */
-     if(sock==SOCKET_ERROR){
-          perror("Erreur socket");
-          exit(-1);
-     }
-	struct sockaddr_in sin;
-	sin.sin_addr.s_addr = htonl(INADDR_ANY); /* on accepte toute adresse */
-	sin.sin_port = htons(port);
-	sin.sin_family = AF_INET;
-	int b = bind (sock, (struct sockaddr*) &sin, sizeof(sin)); /* on lie le socket à sin */
-	if(b==-1){
-		perror("Erreur bind");
-		exit(-1);
-	}
-	int l = listen(sock, 1); /* notre socket est prêt à écouter une connection */
-		if(l==-1){
-			perror("Erreur listen");
-			exit(-1);
-		}
-	return sock;
-}
-
-struct Client add_client(int sock, int* max_fd, int* nb_c){
-
-	struct Client c;
-
-	struct sockaddr_in csin;
-	unsigned int csinsize=sizeof(csin);
-	int csock = accept(sock, (struct sockaddr *) &csin, &csinsize); /* accepter un client */
-	if (csock==-1){
-		perror("Erreur accept");
-		exit(-1);
-	}
-
-	c.csock = csock;
-	c.statut = 0;
-	c.adversaire = NULL;
-	c.tour = 0;
-	c.give_mdp = 0;
-
-	recv_client(csock, c.pseudo);
-
-	(*nb_c)++;
-	if (*max_fd<csock) *max_fd=csock;
-	return c;
-}
-
-struct Client add_client_connect(struct Client client, int* max_fd, int* nb_c){
-	(*nb_c)++;
-	if (*max_fd<client.csock) *max_fd=client.csock;
-	return client;
-}
-
-void rmv_client(struct Client* clients, int i_to_remove, int* nb_c){
-	int k;
-	close(clients[i_to_remove].csock);
-	for(k=i_to_remove;k<*nb_c;k++){
-		clients[k]=clients[k+1];
-	}
-	(*nb_c)--;
-}
-
-void rmv_client_en_connect(struct Client* clients, int i_to_remove, int* nb_c){
-	int k;
-	for(k=i_to_remove;k<*nb_c;k++){
-		clients[k]=clients[k+1];
-	}
-	(*nb_c)--;
-}
-
-int recv_client(int csock, char *buffer){
-	int r = recv(csock, buffer, BUFFSIZE, 0);
-	if(r==-1){
-		perror("Erreur receive");
-		exit(-1);
-	}
-	return r;
-}
-
-int send_client(int csock, char *buffer){
-	int s = send(csock, buffer, BUFFSIZE, 0);
-	if (s==-1){
-		perror("Erreur send");
-		exit(-1);
-	}
-	return s;
-}
-
-void infos_client(struct Client c){
-	printf("--- %s ---\n", c.pseudo);
-	printf("sock : %d\n", c.csock);
-}
-
-void liste_joueurs(struct Client tab[MAX_CLIENT], int nb_c, char result[1]){
-
-	int k, j;
-
-	for(k = 0; k < nb_c; k++){
-		if(tab[k].statut != 2){
-			send_client(tab[k].csock, "--- Joueurs connectés ---\n");
-			for(j = 0; j < nb_c; j++){
-				send_client(tab[k].csock, "joueur ");
-				send_client(tab[k].csock, inttos(result,j));
-				send_client(tab[k].csock, " : ");
-				send_client(tab[k].csock, tab[j].pseudo);
-				if (tab[k].pseudo == tab[j].pseudo) send_client(tab[k].csock, " (vous)");
-				if (tab[j].statut == 2) send_client(tab[k].csock, "(en jeu)");
-				send_client(tab[k].csock, "\n");
-			}
-			send_client(tab[k].csock, "-------------------------\n");
-		}
-	}
-}
-
-void ajouter_joueur_fichier(FILE* fichier, struct Client client){
-
-	fichier = fopen("comptes.txt", "a");
-	fprintf(fichier, "\n%s\n%s\n", client.pseudo, client.mdp);
-	fclose(fichier);
-}
-
-int verif_pseudo_fichier(FILE* fichier, char pseudo[BUFFSIZE]){
-	//printf("\n--- Début verif_pseudo_fichier ---\n");
-	int i;
-
-	char pseudo_test[BUFFSIZE];
-	int cpt = 0;
-
-	fichier = fopen("comptes.txt", "r");
-
-	while(fgets(pseudo_test, BUFFSIZE, fichier) != NULL){
-		//on enleve le retour chariot de fin de ligne
-		for(i = 0; i < BUFFSIZE; i++){
-			if(pseudo_test[i] == '\n'){
-				pseudo_test[i] = '\0';
-				break;
-			}
-		}
-		if(strcmp(pseudo_test, pseudo) == 0){
-			cpt = 1;
-			break;
-		}
-		//printf("Comparaison PSEUDO : |%s|(%d) et |%s|(%d)\n", pseudo, strlen(pseudo), pseudo_test, strlen(pseudo_test));
-	}
-
-	if(cpt == 1){
-		//printf("\n--- FIN verif_pseudo_fichier, on a trouvé ---\n");
-		fclose(fichier);
-		return cpt;
-	}
-	//printf("\n--- FIN verif_pseudo_fichier, rien trouvé ---\n");
-	fclose(fichier);
-	return cpt;
-}
-
-int test_mdp(FILE* fichier, char pseudo[BUFFSIZE], char mdp[BUFFSIZE]){
-	//printf("\n--- Début test_mdp ---\n");
-	int i;
-
-	char pseudo_test[BUFFSIZE];
-	char mdp_test[BUFFSIZE];
-
-	int cpt = 0;
-
-	fichier = fopen("comptes.txt", "r");
-
-	while(fgets(pseudo_test, BUFFSIZE, fichier) != NULL){
-		//on enleve le retour chariot de fin de ligne
-		for(i = 0; i < BUFFSIZE; i++){
-			if(pseudo_test[i] == '\n'){
-				pseudo_test[i] = '\0';
-				break;
-			}
-		}
-		if(strcmp(pseudo_test, pseudo) == 0){
-
-			fgets(mdp_test, BUFFSIZE, fichier);
-			//on enleve le retour chariot de fin de ligne
-			for(i = 0; i < BUFFSIZE; i++){
-				if(mdp_test[i] == '\n'){
-					mdp_test[i] = '\0';
-					break;
-				}
-			}
-			if(strcmp(mdp_test, mdp) == 0){
-				cpt = 1;
-				break;
-			}
-			//printf("Comparaison MDP : |%s|(%d) et |%s|(%d)\n", mdp, strlen(mdp), mdp_test, strlen(mdp_test));
-		}
-		//printf("Comparaison PSEUDO : |%s|(%d) et |%s|(%d)\n", pseudo, strlen(pseudo), pseudo_test, strlen(pseudo_test));
-	}
-
-	if(cpt == 1){
-		//printf("\n--- FIN test_mdp, on a trouvé ---\n");
-		fclose(fichier);
-		return cpt;
-	}
-
-	//printf("\n--- FIN test_mdp, rien trouvé ---\n");
-	fclose(fichier);
 	return 0;
 }

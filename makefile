@@ -1,16 +1,22 @@
-all : serveur client clean
+all : serveur client
 
-serveur : serveur.o
-	gcc -o serveur serveur.o
+serveur : serveurFONCTIONS.o serveur.o
+	gcc -o serveur serveurFONCTIONS.o serveur.o
 
-serveur.o : serveur.c
-	gcc -c serveur.c -Wall
+serveur.o : serveurFONCTIONS.o serveur.h
+	gcc -c -Wall serveur.c
 
-client : client.o
-	gcc `sdl2-config --cflags --libs` -o client client.o
+serveurFONCTIONS.o : serveurFONCTIONS.c
+	gcc -c -Wall serveurFONCTIONS.c
 
-client.o : client.c
-	gcc `sdl2-config --cflags --libs` -Wall -c client.c
+client : clientFONCTIONS.o client.o
+	gcc `sdl2-config --cflags --libs` -o client clientFONCTIONS.o client.o
+
+client.o : clientFONCTIONS.o client.h
+	gcc `sdl2-config --cflags --libs` -c -Wall client.c
+
+clientFONCTIONS.o : clientFONCTIONS.c
+	gcc `sdl2-config --cflags --libs` -c -Wall clientFONCTIONS.c
 
 clean:
 	rm -rf *.o
